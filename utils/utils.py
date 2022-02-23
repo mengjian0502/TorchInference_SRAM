@@ -79,18 +79,3 @@ def save_checkpoint(state, is_best, save_path, filename='checkpoint.pth.tar'):
     torch.save(state, save_path+filename)
     if is_best:
         shutil.copyfile(save_path+filename, save_path+'model_best.pth.tar')
-
-def catgorize_param(model):
-    """Specify learning rate for differnet model paraemters
-    """
-    vth = []
-    params = []
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        elif 'vth' in name:
-            vth.append(param)
-            print("{} selected for low lr".format(name))
-        else:
-            params.append(param)
-    return vth, params

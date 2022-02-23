@@ -5,10 +5,9 @@ DNN base trainer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import wandb
 import time
 from torch.optim.lr_scheduler import LambdaLR
-from utils.utils import accuracy, AverageMeter, print_table, lr_schedule, convert_secs2time, save_checkpoint, catgorize_param
+from utils.utils import accuracy, AverageMeter, print_table, lr_schedule, convert_secs2time, save_checkpoint
 
 class BaseTrainer(object):
     def __init__(self,
@@ -35,16 +34,8 @@ class BaseTrainer(object):
             raise NotImplementedError("Unknown loss type")
         
         # optimizer and lr scheduler
-        if self.args.learnth:
-            vth, params = catgorize_param(model)
-            self.optimizer = torch.optim.Adam([
-                {'params': vth, 'lr': args.lr * 0.05},
-                {'params': params, 'lr': args.lr}
-            ])
-            self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=[lr_schedule, lr_schedule])
-        else:
-            self.optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-            self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=[lr_schedule])
+        self.optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=[lr_schedule])
 
         # model architecture
         self.model = model
@@ -53,20 +44,10 @@ class BaseTrainer(object):
             if args.ngpu > 1:
                 self.model = nn.DataParallel(model)
                 print("Data parallel!")
-        
-        if self.args.learnth:
-            self.vthre = AverageMeter()
-        
 
         # logger
         self.logger = logger
         self.logger_dict = {}
-
-        # wandb logger
-        if args.wandb:
-            self.wandb_logger = wandb.init(entity=args.entity, project=args.project, name=args.name, config={"lr":args.lr})
-            self.wandb_logger.watch(model, criterion=self.criterion, log_freq=1)
-            self.wandb_logger.config.update(args)
 
 
     def base_forward(self, inputs, target):
@@ -89,17 +70,18 @@ class BaseTrainer(object):
             target = F.one_hot(target, 10).float()
 
         out, loss = self.base_forward(inputs, target)
-        
-        if self.args.learnth:
-            reg_alpha = torch.tensor(0.).cuda()
-            cnt = 0
-            for name, param in self.model.named_parameters():
-                if 'vth' in name:
-                    if cnt > 0:
-                        self.vthre.update(param.item())
-                        reg_alpha += param.norm(p=2)
-                cnt += 1
-            loss += self.args.alambda * (reg_alpha)
+
+        # regularization for PACT
+        reg_alpha = torch.tensor(0.).cuda()
+        alambda = torch.tensor(self.args.alambda).cuda()
+
+        alpha = []
+        for name, param in self.model.named_parameters():
+            if 'alpha' in name:
+                alpha.append(param.item())
+                reg_alpha += param.item() ** 2
+        loss += alambda * (reg_alpha)
+
 
         self.base_backward(loss)
         
@@ -164,7 +146,6 @@ class BaseTrainer(object):
         self.logger_dict["valid_loss"] = losses.avg
         self.logger_dict["valid_top1"] = top1.avg
         self.logger_dict["valid_top5"] = top5.avg
-        self.logger_dict["avg_vth"] = self.vthre.avg
 
     def fit(self):
         self.logger.info("\nStart training: lr={}, loss={}".format(self.args.lr, self.args.loss_type))
@@ -194,10 +175,6 @@ class BaseTrainer(object):
 
             filename='checkpoint.pth.tar'
             save_checkpoint(state, is_best, self.args.save_path, filename=filename)
-
-            # online log
-            if self.args.wandb:
-                self.wandb_logger.log(self.logger_dict)
             
             # terminal log
             columns = list(self.logger_dict.keys())
