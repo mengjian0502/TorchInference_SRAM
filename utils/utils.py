@@ -60,9 +60,9 @@ def print_table(values, columns, epoch, logger):
     logger.info(table)
 
 def lr_schedule(epoch):
-    if epoch >= 60:
+    if epoch >= 20:
         factor = 0.1
-        if epoch >= 80:
+        if epoch >= 25:
             factor = 0.01
     else:
         factor = 1.0

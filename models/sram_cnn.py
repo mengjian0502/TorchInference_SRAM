@@ -5,16 +5,17 @@ Convolutional Neural Nets
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .quant_modules import QConv2d, QLinear
+from .quant_modules import QLinear
+from .sram_modules import SRAMConv2d
 
 __all__ = ['cnn_mnist']
 
-class CNN(nn.Module):
-    def __init__(self, num_class=10, drop_rate=0.5, wbit=4, abit=4):
-        super(CNN, self).__init__()
-        self.conv1 = QConv2d(1, 128, 3, 1, bias=False, wbit=wbit, abit=abit)
+class SRAMCNN(nn.Module):
+    def __init__(self, num_class=10, drop_rate=0.5, wbit=4, abit=4, subArray=64):
+        super(SRAMCNN, self).__init__()
+        self.conv1 = SRAMConv2d(1, 128, 3, 1, bias=False, wl_input=abit, wl_weight=wbit, subArray=subArray)
         self.relu1 = nn.ReLU(inplace=True)
-        self.conv2 = QConv2d(128, 128, 3, 1, bias=False, wbit=wbit, abit=abit)
+        self.conv2 = SRAMConv2d(128, 128, 3, 1, bias=False, wl_input=abit, wl_weight=wbit, subArray=subArray)
         self.relu2 = nn.ReLU(inplace=True)
 
         self.dropout1 = nn.Dropout(drop_rate)

@@ -191,4 +191,8 @@ class BaseTrainer(object):
             print('[Need: {:02d}:{:02d}:{:02d}]'.format(
                 need_hour, need_mins, need_secs))
 
+    def eval(self):
+        self.logger.info("\nStart evaluating: loss={}".format(self.args.loss_type))    
+        self.valid_epoch()
+        self.logger.info("Test Accuracy = {:.2f}%".format(self.logger_dict["valid_top1"]))
     

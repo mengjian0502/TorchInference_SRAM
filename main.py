@@ -6,7 +6,7 @@ import logging
 import argparse
 import torch
 from collections import OrderedDict
-from models import CNN
+from models import CNN, SRAMCNN
 from methods import BaseTrainer
 from data import get_loader
 
@@ -37,6 +37,7 @@ parser.add_argument('--loss_type', type=str, default='mse', help='loss func')
 # precision
 parser.add_argument('--wbit', type=int, default=32, help='Weight precision')
 parser.add_argument('--abit', type=int, default=32, help='Activation precision')
+parser.add_argument('--subArray', type=int, default=64, help='subarray size')
 
 # dataset
 parser.add_argument('--dataset', type=str, default='mnist', help='dataset: MNIST')
@@ -84,7 +85,11 @@ def main():
     trainloader, testloader = get_loader(batch_size=args.batch_size, data_path=args.data_path)
 
     # construct model
-    model = CNN(num_class=10)
+    if not args.evaluate:
+        model = CNN(num_class=10, wbit=args.wbit, abit=args.abit)
+    else:
+        model = SRAMCNN(num_class=10, wbit=args.wbit, abit=args.abit, subArray=args.subArray)
+
     logger.info(model)
 
     # resume from the checkpoint
@@ -115,8 +120,11 @@ def main():
         logger=logger,
     )
 
-    # start training
-    trainer.fit()
+    if not args.evaluate:
+        # start training
+        trainer.fit()
+    else:
+        trainer.eval()
 
 if __name__ == '__main__':
     main()

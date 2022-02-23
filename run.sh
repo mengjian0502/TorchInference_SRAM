@@ -7,7 +7,7 @@ fi
 export CUDA_VISIBLE_DEVICES=1
 
 # setting
-epochs=100
+epochs=30
 lr=0.1
 batch_size=128
 loss=cross_entropy

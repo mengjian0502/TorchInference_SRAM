@@ -24,11 +24,11 @@ class SRAMConv2d(nn.Conv2d):
     NeuroSim-based RRAM inference with low precision weights and activations
     """
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, 
-                wl_input=8, wl_weight=8, subArray=128, inference=0, cellBit=1, ADCprecision=5, sensitive_lv=0):
-        super(SRAMConv2d, self).__init__(in_channels, out_channels, kernel_size,
-                                      stride, padding, dilation, groups, bias)
+                wl_input=8, wl_weight=8, subArray=128, cellBit=1, ADCprecision=5):
+        super(SRAMConv2d, self).__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
+        
+        # sw and hw params
         self.wl_input = wl_input
-        self.inference = inference
         self.wl_weight = wl_weight
         self.cellBit = cellBit
         self.ADCprecision = ADCprecision
@@ -43,13 +43,6 @@ class SRAMConv2d(nn.Conv2d):
         self.weight_quant = WQ(wbit=wl_weight)
         self.act_quant = AQ(abit=wl_input, act_alpha=torch.tensor(10.0))
 
-        # conductance
-        self.hrs = 1e-6
-        # self.lrs = 1.11e-04
-        self.lrs = 1.66e-04
-        self.nonideal_unit = self.lrs - self.hrs
-        self.sensitive_lv = sensitive_lv
-    
     def _act_quant(self, input):
         act_alpha = self.act_quant.act_alpha 
         input = torch.where(input < act_alpha, input, act_alpha)
