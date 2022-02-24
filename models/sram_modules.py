@@ -19,6 +19,29 @@ def decimal2binary(weight_q, bitWeight, cellBit):
         weight_q = torch.round((weight_q-remainder.squeeze(0))/cellRange)
     return remainder_list
 
+def flip_twos(wqb_list, wbit, cellbit, negw):
+    ones = wqb_list.eq(1.)*negw
+    zeros = wqb_list.eq(0.)*negw
+
+    for k in range(int(wbit/cellbit)):
+        wqb = wqb_list[k]
+        
+        pos = ones[k]
+        zrs = zeros[k]
+        
+        if k == 0:
+            wqb[pos] = 0
+            wqb[zrs] = 1.
+            pos_prev = pos
+        else:
+            wqb[pos*pos_prev] = 0.
+            wqb[zrs*pos_prev] = 1.
+            pos_prev = pos * pos_prev
+        
+        wqb[negw] = wqb[negw] * (-1)
+        wqb_list[k] = wqb
+    return wqb_list
+
 class SRAMConv2d(nn.Conv2d):
     r"""
     NeuroSim-based RRAM inference with low precision weights and activations
@@ -57,12 +80,30 @@ class SRAMConv2d(nn.Conv2d):
     def forward(self, input: Tensor) -> Tensor:        
         # quantization
         wq, w_scale = stats_quant(self.weight.data, nbit=self.wbit, dequantize=False)
-        wq = wq.add(2 ** (self.wbit - 1) - 1)
-        wd = torch.ones_like(wq).mul(2 ** (self.wbit - 1) - 1)
+        wint = wq.clone()
+
+        # negative weights
+        negw = wq.lt(0.)
         
-        # decomposition
+        # change the weights to positive for now 
+        wq[negw] = wq[negw].add(2 ** (self.wbit - 1))
+        
+        # decomposition (decimal to binary)
         wqb_list = decimal2binary(wq, bitWeight=self.wbit, cellBit=self.cellBit)
-        wdb_list = decimal2binary(wd, bitWeight=self.wbit, cellBit=self.cellBit)
+        
+        # flip the sign bit (2's complement)
+        wqb_list[-1, negw] = 1.
+        
+        # get the bit values for the negative part
+        ones = wqb_list.eq(1.)*negw
+        zeros = wqb_list.eq(0.)*negw
+
+        # flip the bits for the computation
+        wqb_list[ones] = 0.
+        wqb_list[zeros] = 1.
+
+        # convert the 2's complement representation to signed bit values
+        wqb_list = flip_twos(wqb_list, self.wl_weight, self.cellBit, negw)
 
         # input quantization
         xq, x_scale = self._act_quant(input)
@@ -73,7 +114,8 @@ class SRAMConv2d(nn.Conv2d):
         output = torch.zeros((xq.size(0), wq.size(0), odim, odim)).cuda()
         for i in range(wq.size(2)):
             for j in range(wq.size(3)):
-                numSubArray = wq.shape[1] // self.subArray
+                # numSubArray = wq.shape[1] // self.subArray
+                numSubArray = 0
                 
                 if numSubArray == 0:
                     mask = torch.zeros_like(wq)
@@ -89,15 +131,13 @@ class SRAMConv2d(nn.Conv2d):
                         xb_list.append(xb)
                         for k in range(int(self.wbit/self.cellBit)):
                             wqb = wqb_list[k]
-                            wdb = wdb_list[k]
-
-                            outputPartial = F.conv2d(xb, wqb*mask, self.bias, self.stride, self.padding, self.dilation, self.groups)
-                            outputOffset = F.conv2d(xb, wdb*mask, self.bias, self.stride, self.padding, self.dilation, self.groups)
                             scaler = cellRange**k
 
-                            maci = outputPartial - outputOffset
+                            # partial sum
+                            outputPartial = F.conv2d(xb, wqb*mask, self.bias, self.stride, self.padding, self.dilation, self.groups)
+                            maci = outputPartial
                             macs = macs + maci * scaler
-                        
+
                         scalerIN = 2**z
                         outputIN = outputIN + macs * scalerIN
                     output = output + outputIN / x_scale 
@@ -116,13 +156,12 @@ class SRAMConv2d(nn.Conv2d):
 
                             for k in range(int(self.wbit/self.cellBit)):
                                 wqb = wqb_list[k]
-                                wdb = wdb_list[k]
-
+                                
+                                # partial sum
                                 outputPartial = F.conv2d(xb, wqb*mask, self.bias, self.stride, self.padding, self.dilation, self.groups)
-                                outputOffset = F.conv2d(xb, wdb*mask, self.bias, self.stride, self.padding, self.dilation, self.groups)
                                 scaler = cellRange**k
 
-                                maci = outputPartial - outputOffset
+                                maci = outputPartial
                                 macs = macs + maci * scaler
                                 
                             total_macs = total_macs.add(macs)
