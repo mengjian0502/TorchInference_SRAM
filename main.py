@@ -5,8 +5,9 @@ import os
 import logging
 import argparse
 import torch
+import models
 from collections import OrderedDict
-from models import CNN, SRAMCNN
+from models import CNN, SRAMCNN, vgg7_quant
 from methods import BaseTrainer
 from data import get_loader
 
@@ -38,6 +39,8 @@ parser.add_argument('--loss_type', type=str, default='mse', help='loss func')
 parser.add_argument('--wbit', type=int, default=32, help='Weight precision')
 parser.add_argument('--abit', type=int, default=32, help='Activation precision')
 parser.add_argument('--subArray', type=int, default=64, help='subarray size')
+parser.add_argument('--sensitive_lv', type=float, nargs='+', default=[], help='swipe sensitive levels')
+parser.add_argument('--rram_type', type=str, help='RRAM device')
 
 # dataset
 parser.add_argument('--dataset', type=str, default='mnist', help='dataset: MNIST')
@@ -52,12 +55,14 @@ parser.add_argument('--ngpu', type=int, default=2, help='0 = CPU.')
 parser.add_argument('--workers', type=int, default=16,help='number of data loading workers (default: 2)')
 
 # learnable activation clipping
+parser.add_argument('--alpha_init', default=10.0, type=float, help='learning rate')
 parser.add_argument('--alambda', default=1e-5, type=float, help='L2 regularization of learnable threshold')
 
 # Fine-tuning
 parser.add_argument('--fine_tune', dest='fine_tune', action='store_true',
                     help='fine tuning from the pre-trained model, force the start epoch be zero')
 parser.add_argument('--resume', default='', type=str, help='path of the pretrained model')
+
 
 args = parser.parse_args()
 
@@ -81,14 +86,14 @@ def main():
     logger.root.setLevel(0)
     logger.info(args)
 
-    # dataset (MNIST)
-    trainloader, testloader = get_loader(batch_size=args.batch_size, data_path=args.data_path)
+    # dataset
+    trainloader, testloader, num_classes = get_loader(args)
 
-    # construct model
-    if not args.evaluate:
-        model = CNN(num_class=10, wbit=args.wbit, abit=args.abit)
-    else:
-        model = SRAMCNN(num_class=10, wbit=args.wbit, abit=args.abit, subArray=args.subArray)
+    # configure model
+    model_cfg = getattr(models, args.model)
+    model_cfg.kwargs.update({"num_classes": num_classes, "wbit": args.wbit, "abit":args.abit, "alpha_init": args.alpha_init, 
+                    "wqmode": "symm", "rram_type": args.rram_type, "sensitive_lv":args.sensitive_lv})
+    model = model_cfg.base(*model_cfg.args, **model_cfg.kwargs) 
 
     logger.info(model)
 
